@@ -30,6 +30,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.documentfile.provider.DocumentFile
+import android.content.Intent
+import android.provider.OpenableColumns
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
@@ -43,9 +45,48 @@ private val Ink = Color(0xFF17243A)
 data class Doc(val uri: String, val name: String, val mime: String)
 
 class MainActivity : ComponentActivity() {
+    private var incomingDoc by mutableStateOf<Doc?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        incomingDoc = docFromIntent(intent)
         setContent { NovaApp() }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        incomingDoc = docFromIntent(intent)
+    }
+
+    private fun docFromIntent(intent: Intent?): Doc? {
+        if (intent == null) return null
+        val uri = intent.data
+            ?: intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+            ?: intent.clipData?.getItemAt(0)?.uri
+            ?: return null
+        val mime = intent.type ?: contentResolver.getType(uri) ?: "application/octet-stream"
+        var name = uri.lastPathSegment?.substringAfterLast('/') ?: "Документ"
+        try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (index >= 0) name = cursor.getString(index) ?: name
+                }
+            }
+        } catch (_: Exception) { }
+        if (!name.contains('.')) {
+            val ext = when (mime) {
+                "application/pdf" -> "pdf"
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> "docx"
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" -> "xlsx"
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> "pptx"
+                "text/plain" -> "txt"
+                else -> ""
+            }
+            if (ext.isNotEmpty()) name += ".$ext"
+        }
+        return Doc(uri.toString(), name, mime)
     }
 
     @Composable
@@ -55,8 +96,17 @@ class MainActivity : ComponentActivity() {
         var favorites by remember { mutableStateOf(readFavorites(prefs)) }
         var tab by remember { mutableStateOf("Главная") }
         var query by remember { mutableStateOf("") }
-        var opened by remember { mutableStateOf<Doc?>(null) }
+        var opened by remember { mutableStateOf<Doc?>(incomingDoc) }
         var message by remember { mutableStateOf<String?>(null) }
+
+        LaunchedEffect(incomingDoc) {
+            incomingDoc?.let { doc ->
+                opened = doc
+                docs = (listOf(doc) + docs.filterNot { it.uri == doc.uri }).take(300)
+                writeDocs(prefs, docs)
+                incomingDoc = null
+            }
+        }
 
         val picker = rememberLauncherForActivityResult(
             ActivityResultContracts.OpenMultipleDocuments()
