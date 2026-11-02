@@ -12,6 +12,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +32,8 @@ import androidx.compose.ui.unit.sp
 import androidx.documentfile.provider.DocumentFile
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 private val Navy = Color(0xFF173B70)
 private val Blue = Color(0xFF246BCE)
@@ -77,7 +81,11 @@ class MainActivity : ComponentActivity() {
         MaterialTheme(colorScheme = lightColorScheme(primary = Navy, secondary = Blue, background = Page)) {
             Surface(Modifier.fillMaxSize(), color = Page) {
                 if (opened != null) {
-                    PdfViewer(opened!!, onBack = { opened = null }, onError = { message = it })
+                    if (opened!!.name.substringAfterLast('.', "").lowercase() == "pdf") {
+                        PdfViewer(opened!!, onBack = { opened = null }, onError = { message = it })
+                    } else {
+                        OfficeViewer(opened!!, onBack = { opened = null }, onError = { message = it })
+                    }
                 } else {
                     Column(Modifier.fillMaxSize()) {
                         Header()
@@ -106,7 +114,10 @@ class MainActivity : ComponentActivity() {
                                     "application/vnd.ms-excel",
                                     "application/vnd.openxmlformats-officedocument.presentationml.presentation",
                                     "application/vnd.ms-powerpoint",
-                                    "text/plain"
+                                    "text/plain",
+                                    "application/rtf",
+                                    "text/rtf",
+                                    "*/*"
                                 )) }
                                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically) {
@@ -147,8 +158,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun open(doc: Doc, onPdf: (Doc) -> Unit, onError: (String) -> Unit) {
-        if (doc.mime == "application/pdf" || doc.name.endsWith(".pdf", true)) onPdf(doc)
-        else onError("В этой первой версии встроенный просмотрщик работает с PDF. Просмотр DOCX, XLSX и PPTX добавим следующим этапом.")
+        onPdf(doc)
     }
 
     private fun toggleFavorite(doc: Doc, prefs: android.content.SharedPreferences,
@@ -209,7 +219,7 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun DocList(list: List<Doc>, favorites: Set<String>,
+    private fun ColumnScope.DocList(list: List<Doc>, favorites: Set<String>,
                         onOpen: (Doc) -> Unit, onFavorite: (Doc) -> Unit) {
         if (list.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
@@ -241,6 +251,63 @@ class MainActivity : ComponentActivity() {
                                 null, tint = if (doc.uri in favorites) Color(0xFFE2A52B) else Color.LightGray)
                         }
                     }
+                }
+            }
+        }
+    }
+
+
+    @Composable
+    private fun OfficeViewer(doc: Doc, onBack: () -> Unit, onError: (String) -> Unit) {
+        var content by remember(doc.uri) { mutableStateOf("") }
+        var loading by remember(doc.uri) { mutableStateOf(true) }
+        var localError by remember(doc.uri) { mutableStateOf<String?>(null) }
+
+        LaunchedEffect(doc.uri) {
+            loading = true
+            localError = null
+            try {
+                content = withContext(Dispatchers.IO) {
+                    OfficeReader.read(Uri.parse(doc.uri), doc.name) { uri ->
+                        contentResolver.openInputStream(uri)
+                            ?: throw IllegalStateException("Android не смог открыть выбранный файл.")
+                    }
+                }
+            } catch (e: Exception) {
+                localError = e.message ?: "Не удалось прочитать документ."
+            }
+            loading = false
+        }
+
+        Column(Modifier.fillMaxSize().background(Page)) {
+            Row(
+                Modifier.fillMaxWidth().background(Color.White).padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Navy) }
+                Text(
+                    doc.name,
+                    Modifier.weight(1f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text("Просмотр", color = Color.Gray, fontSize = 11.sp)
+            }
+            when {
+                loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = Navy)
+                }
+                localError != null -> Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+                    Text(localError!!, color = Color(0xFF9B3434))
+                }
+                else -> Column(
+                    Modifier.fillMaxSize().background(Color.White)
+                        .verticalScroll(rememberScrollState()).padding(18.dp)
+                ) {
+                    Text(doc.name, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Ink)
+                    Spacer(Modifier.height(14.dp))
+                    Text(content, fontSize = 14.sp, lineHeight = 21.sp, color = Ink)
                 }
             }
         }
