@@ -130,7 +130,8 @@ object OfficeReader {
             .toSortedMap(compareBy { it.substringAfterLast("slide").substringBefore(".xml").toIntOrNull() ?: 0 })
         if (slides.isEmpty()) return "В презентации не найдены слайды."
         val result = StringBuilder()
-        slides.forEachIndexed { index, (_, bytes) ->
+        slides.entries.forEachIndexed { index, entry ->
+            val bytes = entry.value
             result.append("Слайд ").append(index + 1).append('\n')
             val p = parser(bytes)
             var paragraphHasText = false
