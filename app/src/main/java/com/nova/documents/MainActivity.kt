@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
         val picker = rememberLauncherForActivityResult(
             ActivityResultContracts.OpenMultipleDocuments()
         ) { uris ->
+            var updatedDocs = docs
             uris.forEach { uri ->
                 try {
                     contentResolver.takePersistableUriPermission(
@@ -73,9 +74,10 @@ class MainActivity : ComponentActivity() {
                     file?.name ?: "Документ",
                     contentResolver.getType(uri) ?: "application/octet-stream"
                 )
-                docs = (listOf(doc) + docs.filterNot { it.uri == doc.uri }).take(300)
+                updatedDocs = (listOf(doc) + updatedDocs.filterNot { it.uri == doc.uri }).take(300)
             }
-            writeDocs(prefs, docs)
+            docs = updatedDocs
+            writeDocs(prefs, updatedDocs)
         }
 
         MaterialTheme(colorScheme = lightColorScheme(primary = Navy, secondary = Blue, background = Page)) {
